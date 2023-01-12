@@ -1,7 +1,7 @@
 # Nightscout Setup on CentOS Stream 8
 This is still a work in progress. NO NOT FOLLOW YET!
 
-This guide will cover how to set up an instance of [Nightscout](https://nightscout.github.io/) on a **fresh** CentOS 9 Stream machine as well as basic server security, reverse proxying with nginx, and securing nginx with LetsEncrypt. There are plenty of Nightscout guides for Ubuntu, but nothing good for RPM distrobutions (Red Hat derived distrbutions). You may be more comfortable with Red Hat Linux, or use Foreman or Satellite to manage RHEL servers and want Nightscout to be updated with the rest of your RH servers. 
+This guide will cover how to set up an instance of [Nightscout](https://nightscout.github.io/) on a **fresh** CentOS Stream 8 machine as well as basic server security, reverse proxying with nginx, and securing nginx with LetsEncrypt. There are plenty of Nightscout guides for Ubuntu, but nothing good for RPM distrobutions (Red Hat derived distrbutions). You may be more comfortable with Red Hat Linux, or use Foreman or Satellite to manage RHEL servers and want Nightscout to be updated with the rest of your RH servers. 
 
 There are plenty of other Red Hat distrobutions (Fedora, Suse, Rocky, Oracle, Alma, etc) but I like CentOS Stream since it's still supported by Red Hat (unlike downstream distros like Suse, Rocky, Alma, and Oracle), but is the closest upstream distro to the offical Red Hat Enterprise Linux. 
 
@@ -9,14 +9,13 @@ Not to get too "Inside Baseball", but the current devolpment stream is:
 
 Rawhide —> Fedora —> CentOS stream —> RHEL —> (Rocky, Alma, Oracle, and Suse*kinda*).
 
-CentOS Stream seems like the best "Sweetspot" for me. If you prefer a downstream distro, Godspeed to you. 
+CentOS Stream seems like the best "Sweet spot" for me. If you prefer a downstream distro, Godspeed to you. 
 
 **Note: If your host didn't give you a root account, you can skip this section and "securing your server".**
 Once you're inside, you should see a line on the bottom saying:
 ```bash
 root@<machine hostname>:~$ 
 ```
-This is the shell you will be using for the rest of this guide.
 
 ## Securing your server
 While we can't run nightscout as root, we want to start as root to update the server and create the service user. 
@@ -203,13 +202,55 @@ screen
 
 `screen` is used to allow the nightscout application to continue running even after you disconnect from your SSH session. While this won't be needed after we create the SystemD node, it's useful while we test functionality and create the SSL certificates. You can detach from your `screen` session by pressing `Ctrl + A`, then `D`. You can reattach it with the `screen -x` command. Make sure to detach from your `screen` session before you exit out of your `ssh` session.
 
-Determine the local IP address of your nightscout server by typing `ip -c a | grep inet`. The purple fonted address that is not 127.0.0.1 should be your local IP address. 
+Determine the local IP address of your nightscout server by typing `ip -c a | grep inet`. The purple fonted address that is not 127.0.0.1 and doesn't end in "255" should be your local IP address. 
 
-Navigate your browser to that address plus `:1337`, as in `http://192.168.1.110:1337`.
+Navigate your browser to that address plus `:1337`, as in `http://192.168.1.110:1337` or `http://10.1.10.225:1337`.
 
 If you receive some issue about SSL in your browser, make sure that you have `INSECURE_USE_HTTP=true` in your `my.var` file. If you don't intend to set up a reverse proxy with Nginx or Apache, keep this field as it is. 
 
 If you didn't get any errors when installing nodejs, npm, or start.sh, you should see your BG trend in nightscout!
+
+### Making Nightscout a service
+Making a SystemD service node for nightscout gives you the ability to start the website automatically upon reboot and to monitor it. If it should crash for any reason, SystemD will automatically restart it. 
+
+Stop nightscout by first going back into screen with `screen -x` (if you left it with `Ctrl + A`, then `D`) and the type `Ctrl + C` to escape the application and then `Ctrl + A`, then `D` to go back into your main session.
+
+Create the SystemD service node
+```bash
+sudo nano /lib/systemd/system/nightscout.service
+```
+Paste the following text into the `nightscout.service` file.
+```bash
+[Unit]
+Description=Nightscout
+Documentation=https://github.com/nightscout/cgm-remote-monitor
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=nightscout
+Group=nightscout
+WorkingDirectory=/home/nightscout/cgm-remote-monitor
+ExecStart=/bin/bash /home/nightscout/cgm-remote-monitor/start.sh
+ExecStop=killall -3 -u nightscout node
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+```
+Save and Exit the file.
+
+Reload the daemon and start the service
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start nightscout.service
+```
+
+Check the status of the service with `systemctl status nightscout.service` and make the service start automatically with `systemctl enable nightscout.service`.
+
 
 ### Reverse Proxy
 Assuming you have a domain with an A record pointing towards your machine, we are now going to set up a reverse proxy for Nightscout using nginx, then encrypting the connection with LetsEncrypt. Let's start by installing nginx.
@@ -236,15 +277,15 @@ server {
 }
 ```
 
-
 Check if your configuration was proper with `sudo nginx -t`, if it says it's ok, restart nginx with `sudo systemctl restart nginx`. We should now install Certbot so we can secure Nginx with LetsEncrypt.
 ```
-sudo dnf install certbot python3-certbot-nginx -y
+sudo dnf install certbot -y
+sudo dnf install python3-certbot-nginx mod_ssl -y
 sudo certbot --nginx -d example.com
 ```
 
 It will ask for your email and to agree to their terms and conditions. Enter in the information they ask for, press "2" when it asks whether you'd like to redirect HTTP traffic to HTTPS, then LetsEncrypt will be set up.
 
-You should now modify your Nightscout configuration to remove the `INSECURE_USE_HTTP` field if you haven't already, reattach your screen session with `screen -x`, and re-run Nightscout by hitting `Ctrl + C` to stop the current process, and hitting the "up" button on your keyboard to repeat the start command.
+You should now modify your Nightscout configuration to remove the `INSECURE_USE_HTTP` field if you haven't already, restart the nightscout service with `sudo systemctl restart nightscout.service`.
 
-That's all folks!
+You now have a self-hosted Nightscout server!
